@@ -1,0 +1,12 @@
+[package]
+name = "maitouch_rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serialport = "4.3.0"
+anyhow = "1.0.86"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+structopt = "0.3.26"
+memchr = "2.7.2"
