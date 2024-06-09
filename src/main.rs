@@ -1,12 +1,12 @@
 use anyhow::Result;
 use std::io::{BufRead, BufReader, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::RwLock;
 use std::thread;
 use std::time::Duration;
 use structopt::StructOpt;
 
 mod io;
+mod touchbuffer;
 
 const MAX_MESSAGE_SIZE: usize = 6;
 const TOUCH_PACKET_SIZE: usize = 9;
@@ -44,25 +44,15 @@ fn read_packet(
     buffer.clear();
     buffer.push(packet.open as u8);
     tracing::trace!("skip_until");
-    loop {
-        match io::skip_until(reader, packet.open as u8) {
-            Err(err) => {
-                if err.kind() != std::io::ErrorKind::TimedOut {
-                    return Err(err);
-                }
-            }
-            Ok(_) => break,
+    while let Err(err) = io::skip_until(reader, packet.open as u8) {
+        if err.kind() != std::io::ErrorKind::TimedOut {
+            return Err(err);
         }
     }
     tracing::trace!("read_until");
-    loop {
-        match reader.read_until(packet.close as u8, buffer) {
-            Err(err) => {
-                if err.kind() != std::io::ErrorKind::TimedOut {
-                    return Err(err);
-                }
-            }
-            Ok(_) => break,
+    while let Err(err) = reader.read_until(packet.close as u8, buffer) {
+        if err.kind() != std::io::ErrorKind::TimedOut {
+            return Err(err);
         }
     }
     Ok(())
@@ -85,7 +75,7 @@ fn stat_mode(
 ) -> Result<()> {
     tracing::info!("Streaming mode");
     let run_flag = AtomicBool::new(true);
-    let state_buffer = RwLock::new([0u8; TOUCH_PACKET_SIZE]);
+    let state_buffer = touchbuffer::TouchBuffer::default();
 
     thread::scope(|scope| {
         // Read the latest touch update
@@ -101,20 +91,16 @@ fn stat_mode(
                     );
                     continue;
                 }
-                {
-                    let mut locked_buf = state_buffer.write().unwrap();
-                    locked_buf.as_mut().copy_from_slice(local_buf.as_slice());
-                }
+                state_buffer.store(&local_buf);
             }
         });
 
         // Write the latest touch update
         scope.spawn(|| {
+            let mut local_buf = Vec::<u8>::with_capacity(TOUCH_PACKET_SIZE);
             while run_flag.load(Ordering::Relaxed) {
-                {
-                    let locked_buf = state_buffer.read().unwrap();
-                    alls_writer.write_all(locked_buf.as_ref()).unwrap();
-                }
+                state_buffer.load(&mut local_buf);
+                alls_writer.write_all(&local_buf).unwrap();
                 alls_writer.flush().unwrap();
             }
         });

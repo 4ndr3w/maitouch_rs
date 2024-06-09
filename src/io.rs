@@ -1,4 +1,3 @@
-use memchr;
 use std::io::{BufRead, ErrorKind, Result};
 
 // Copy-paste of BufRead::skip_until so that we can build on stable rust
